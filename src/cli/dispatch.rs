@@ -5,9 +5,9 @@ use std::ffi::OsString;
 use super::args;
 use super::commands::{
     cmd_add, cmd_brew, cmd_build, cmd_check, cmd_clean, cmd_completions, cmd_doctor, cmd_flavors,
-    cmd_fmt, cmd_gc, cmd_help, cmd_infuse, cmd_init, cmd_interpreter, cmd_lint, cmd_lock, cmd_new,
-    cmd_pytest, cmd_pytest_child, cmd_remove, cmd_repl, cmd_run, cmd_spawn, cmd_steep, cmd_sync,
-    cmd_test, cmd_version,
+    cmd_fmt, cmd_gc, cmd_help, cmd_infuse, cmd_init, cmd_install, cmd_interpreter, cmd_lint,
+    cmd_lock, cmd_new, cmd_pytest, cmd_pytest_child, cmd_remove, cmd_repl, cmd_run, cmd_spawn,
+    cmd_steep, cmd_sync, cmd_test, cmd_version,
 };
 use super::{CliError, CliResult};
 
@@ -40,6 +40,7 @@ pub(crate) fn dispatch(args: &[OsString]) -> CliResult {
         // Internal entry point used by `tea pytest` for one isolated file.
         "__pytest" => cmd_pytest_child(&args[1..], verbosity),
         "fmt" => cmd_fmt(&args[1..], verbosity),
+        "install" => cmd_install(&args[1..], verbosity),
         "lint" => cmd_lint(&args[1..], verbosity),
         "clean" => cmd_clean(&args[1..], verbosity),
         "add" => cmd_add(&args[1..]),

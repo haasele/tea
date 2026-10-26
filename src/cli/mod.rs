@@ -68,6 +68,7 @@ pub(crate) fn usage_text() -> String {
          tea fmt [paths...] [--check]       strip trailing whitespace and fix the final newline\n  \
          tea lint [paths...] [options]      type-check every .py file in the given paths\n  \
          tea clean [--dry-run]              remove .tea/cache and target/tea-tmp\n  \
+         tea install <wheel.whl> [--target DIR]  unpack a compatible wheel into site-packages\n  \
          tea add <spec...> [uv options]     add dependencies with uv\n  \
          tea remove <spec...> [uv options]  remove dependencies with uv\n  \
          tea sync [uv options]              sync the environment with uv\n  \
@@ -145,9 +146,18 @@ pub(crate) fn usage_text() -> String {
          tea run forwards its arguments verbatim to `uv run` in the current\n  \
          directory; add/remove/sync/lock forward their arguments verbatim too\n  \
          tea adds no options of its own and returns the exit status of uv\n\n\
+         install:\n  \
+         the wheel must target CPython 3.14 (py3-none-any, py3-none-<platform>,\n  \
+         cp314-* or an abi3 wheel) and a compatible platform; members are validated\n  \
+         before anything is written and unpacked through a temporary directory\n  \
+         --target DIR             install into DIR (default: VIRTUAL_ENV/lib/python3.14/\n  \
+                                  site-packages, else .tea/site-packages)\n  \
+         HYDRO_SITE_PACKAGES=<DIR> makes an explicit target visible to tea infuse\n\n\
          environment:\n  \
          CC                       C compiler used to link AOT binaries (default: cc)\n  \
          HYDRO_RUNTIME_LIB          path to libhydro_runtime.a\n  \
+         HYDRO_SITE_PACKAGES      site-packages directories searched for modules and\n  \
+                                  extensions (before VIRTUAL_ENV/CONDA_PREFIX)\n  \
          TEA_UV                   uv executable used by run/add/remove/sync/lock (default: uv)\n  \
          NO_COLOR                 disable colored diagnostics when set\n\n\
          exit codes: 0 success, 1 user/program error, 2 internal/setup error\n",

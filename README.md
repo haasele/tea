@@ -19,6 +19,7 @@ profile-guided **flavor** store. Hydro owns the compiler/runtime monorepo.
 | `tea flavors` | List stored flavors, run counts and function counts. |
 | `tea test` / `tea pytest` | Run test programs / the pytest-compatible runner (engine mode). |
 | `tea new/init/check/fmt/lint/clean/gc/doctor/completions` | Project and developer commands. |
+| `tea install <wheel.whl> [--target DIR]` | Validate a CPython 3.14 wheel and unpack it into site-packages (`VIRTUAL_ENV`, else `.tea/site-packages`, or `--target`). |
 | `tea add/remove/sync/lock` | Unchanged `uv` passthrough; `TEA_UV` overrides the executable. |
 
 ## Flavors

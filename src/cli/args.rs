@@ -342,6 +342,91 @@ pub(crate) fn parse_scan(
     })
 }
 
+/// Options of `tea install`.
+#[derive(Debug)]
+pub(crate) struct InstallOptions {
+    /// The wheel to unpack.
+    pub(crate) wheel: PathBuf,
+    /// `--target DIR`; `None` selects `VIRTUAL_ENV` or `.tea/site-packages`.
+    pub(crate) target: Option<PathBuf>,
+    pub(crate) verbosity: Verbosity,
+}
+
+/// Parse `tea install <wheel.whl> [--target DIR]`.
+///
+/// The wheel is the only positional argument; `--target` accepts both
+/// `--target DIR` and `--target=DIR`.
+pub(crate) fn parse_install(
+    args: &[OsString],
+    verbosity: Verbosity,
+) -> Result<InstallOptions, CliError> {
+    let mut wheel: Option<PathBuf> = None;
+    let mut target: Option<PathBuf> = None;
+    let mut verbosity = verbosity;
+    let mut positional_only = false;
+    let mut index = 0;
+
+    while index < args.len() {
+        let text = args[index].to_string_lossy();
+        if !positional_only && text == "--" {
+            positional_only = true;
+            index += 1;
+            continue;
+        }
+        if !positional_only && text.starts_with('-') && text != "-" {
+            if let Some(result) = apply_verbosity(text.as_ref(), &mut verbosity, "install") {
+                result?;
+                index += 1;
+                continue;
+            }
+            match text.as_ref() {
+                "--target" => {
+                    let value = args.get(index + 1).ok_or_else(|| {
+                        CliError::usage("tea: install: option '--target' requires a directory")
+                    })?;
+                    if value.to_string_lossy().is_empty() {
+                        return Err(CliError::usage(
+                            "tea: install: option '--target' requires a non-empty directory",
+                        ));
+                    }
+                    target = Some(PathBuf::from(value.as_os_str()));
+                    index += 2;
+                    continue;
+                }
+                other => {
+                    if let Some(value) = other.strip_prefix("--target=") {
+                        if value.is_empty() {
+                            return Err(CliError::usage(
+                                "tea: install: option '--target' requires a non-empty directory",
+                            ));
+                        }
+                        target = Some(PathBuf::from(value));
+                        index += 1;
+                        continue;
+                    }
+                    return Err(CliError::usage(format!(
+                        "tea: install: unsupported option '{other}'"
+                    )));
+                }
+            }
+        }
+        if wheel.is_some() {
+            return Err(CliError::usage(format!(
+                "tea: install: unexpected argument '{text}'"
+            )));
+        }
+        wheel = Some(PathBuf::from(args[index].as_os_str()));
+        index += 1;
+    }
+
+    let wheel = wheel.ok_or_else(|| CliError::usage("tea: install: missing wheel file"))?;
+    Ok(InstallOptions {
+        wheel,
+        target,
+        verbosity,
+    })
+}
+
 /// Parse `clean [--dry-run]` and the global verbosity switches.
 pub(crate) fn parse_clean(
     args: &[OsString],
@@ -859,5 +944,38 @@ mod tests {
             .as_deref()
             .unwrap_or_default()
             .contains("unsupported option '--bogus'"));
+    }
+
+    #[test]
+    fn install_accepts_a_wheel_and_target() {
+        let input = args(&["pkg-1.0-py3-none-any.whl", "--target", "/tmp/site"]);
+        let options = super::parse_install(&input, Verbosity::Normal).unwrap();
+        assert_eq!(options.wheel, PathBuf::from("pkg-1.0-py3-none-any.whl"));
+        assert_eq!(options.target, Some(PathBuf::from("/tmp/site")));
+
+        let input = args(&["--verbose", "pkg.whl", "--target=/tmp/other"]);
+        let options = super::parse_install(&input, Verbosity::Normal).unwrap();
+        assert_eq!(options.target, Some(PathBuf::from("/tmp/other")));
+        assert!(options.verbosity.is_verbose());
+    }
+
+    #[test]
+    fn install_requires_exactly_one_wheel() {
+        let error = super::parse_install(&args(&[]), Verbosity::Normal).unwrap_err();
+        assert_eq!(error.code, 2);
+        assert!(error
+            .message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("missing wheel file"));
+
+        let error =
+            super::parse_install(&args(&["a.whl", "b.whl"]), Verbosity::Normal).unwrap_err();
+        assert_eq!(error.code, 2);
+        assert!(error
+            .message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("unexpected argument 'b.whl'"));
     }
 }

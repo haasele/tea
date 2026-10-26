@@ -229,6 +229,48 @@ The rest of
 .B target/
 is left alone, and missing paths are not an error.
 .TP
+.B install \fIwheel.whl\fR [\fB\-\-target\fR \fIDIR\fR]
+Validate and unpack a wheel.
+The filename must name a wheel compatible with the implemented CPython 3.14
+target and the host platform:
+.BR py3\-none\-any ,
+.BR py3\-none\-\fIplatform\fR ,
+.BR cp314\-\fIplatform\fR
+or an
+.B abi3
+wheel; incompatible Python, ABI and platform tags are rejected before
+anything is written.
+Member paths are checked for absolute paths, parent\-directory components,
+symlinks, duplicate entries and unsupported compression methods, and the
+archive is unpacked through a temporary directory before it is moved into
+place, so a failure never reports a package as installed.
+.PP
+The default target is
+.B $VIRTUAL_ENV/lib/python3.14/site\-packages
+when
+.B VIRTUAL_ENV
+is set, otherwise
+.BR .tea/site\-packages .
+With
+.B \-\-target
+the wheel is unpacked into
+.I DIR
+instead.
+The wheel's contents, including
+.BR .dist\-info/ ,
+are preserved; an
+.B INSTALLER
+record is added when the wheel does not provide one.
+Extensions installed this way use the suffixes
+.BR <leaf>.so ,
+.B <leaf>.abi3.so
+or
+.BR <leaf>.cpython\-314\-\fIplatform\fR.so .
+.PP
+An explicit target must be exposed to the frontend with
+.BR HYDRO_SITE_PACKAGES ;
+the command prints that hint when the target is not already searched.
+.TP
 .B add \fIspec\fR... [\fIuv options\fR]
 .TQ
 .B remove \fIspec\fR... [\fIuv options\fR]
