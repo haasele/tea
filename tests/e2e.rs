@@ -496,19 +496,13 @@ fn run_slices_gc() {
 }
 
 #[test]
-fn check_dynamic_format_spec() {
+fn dynamic_format_spec_is_evaluated() {
     let program = example("errors/format_spec.py");
     let (code, stdout, stderr) = run(&["infuse", &program]);
 
-    assert_eq!(code, 1, "dynamic format spec must exit with status 1");
-    assert!(
-        stdout.is_empty(),
-        "no code may run after a frontend diagnostic"
-    );
-    assert!(
-        stderr.contains("dynamic") && stderr.contains("format spec"),
-        "missing dynamic format-spec diagnostic, got:\n{stderr}"
-    );
+    assert_eq!(code, 0, "tea infuse failed:\n{stderr}");
+    assert!(stderr.is_empty(), "unexpected stderr:\n{stderr}");
+    assert_eq!(stdout, "    7\n");
 }
 
 #[test]

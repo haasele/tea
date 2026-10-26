@@ -548,7 +548,7 @@ fn run_linker(object: &Path, runtime: &Path, output: &Path) -> Result<(), LinkFa
     if cfg!(target_os = "linux") {
         command.arg("-Wl,--export-dynamic");
     }
-    command.arg("-lpthread").arg("-ldl").arg("-lm");
+    command.arg("-lpthread").arg("-ldl").arg("-lm").arg("-lz");
 
     let result = command.output().map_err(|error| LinkFailure {
         compiler: compiler.clone(),
