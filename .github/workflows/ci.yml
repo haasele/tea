@@ -21,11 +21,14 @@ jobs:
       - name: Checkout Tea
         uses: actions/checkout@v4
 
-      - name: Checkout Hydro (sibling)
+      - name: Checkout Hydro
         uses: actions/checkout@v4
         with:
           repository: haasele/hydro
-          path: ../hydro
+          path: hydro-src
+
+      - name: Link Hydro as sibling
+        run: ln -sfn "$GITHUB_WORKSPACE/hydro-src" ../hydro
 
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
