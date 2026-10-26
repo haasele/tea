@@ -1,0 +1,22 @@
+/target
+
+# Tea project/flavor state
+.tea/
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# AOT/temp artifacts
+*.o
+*.a
+*.tmp
+
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store

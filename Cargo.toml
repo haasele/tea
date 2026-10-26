@@ -1,0 +1,19 @@
+[package]
+name = "tea"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Tea: the Hydro Python toolchain"
+
+[[bin]]
+name = "tea"
+path = "src/main.rs"
+
+[dependencies]
+hydro-frontend = { path = "../hydro/crates/hydro-frontend" }
+hydro-ir = { path = "../hydro/crates/hydro-ir" }
+hydro-codegen = { path = "../hydro/crates/hydro-codegen" }
+hydro-runtime = { path = "../hydro/crates/hydro-runtime" }
+hydro-interp = { path = "../hydro/crates/hydro-interp" }
+
+[workspace]
