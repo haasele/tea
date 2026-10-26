@@ -136,18 +136,15 @@ fn check_reports_missing_module() {
 }
 
 #[test]
-fn check_reports_circular_import() {
+fn circular_imports_bind_late() {
     let dir = TestDir::new("cycle");
     dir.write("a.py", "from b import g\n\ndef f():\n    return 1\n");
     dir.write("b.py", "from a import f\n\ndef g():\n    return 2\n");
     let main = dir.write("main.py", "import a\nprint(a.f())\n");
     let main = main.to_string_lossy().into_owned();
-    let (code, _stdout, stderr) = run(&["check", main.as_str()]);
-    assert_eq!(code, 1, "cycle must fail:\n{stderr}");
-    assert!(
-        stderr.contains("circular import"),
-        "missing cycle diagnostic:\n{stderr}"
-    );
+    let (code, stdout, stderr) = run(&["infuse", main.as_str()]);
+    assert_eq!(code, 0, "cycle must bind late:\n{stderr}");
+    assert_eq!(stdout, "1\n");
 }
 
 #[test]
