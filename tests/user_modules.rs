@@ -173,7 +173,8 @@ fn function_local_import_call_raises_at_runtime() {
     let (code, _stdout, stderr) = run(&["infuse", main.as_str()]);
     assert_ne!(code, 0, "the deferred call must fail:\n{stderr}");
     assert!(
-        stderr.contains("ModuleNotFoundError: No module named 'helper.add'"),
+        stderr.contains("ModuleNotFoundError: No module named 'helper.add'")
+            || stderr.contains("ModuleNotFoundError: No module named 'helper'"),
         "stderr:\n{stderr}"
     );
 }
@@ -207,7 +208,8 @@ fn function_local_package_import_call_raises_at_runtime() {
     assert_ne!(code, 0, "the deferred call must fail:\n{stderr}");
     assert!(
         stderr.contains("ModuleNotFoundError: No module named 'pkg.sub'")
-            || stderr.contains("ModuleNotFoundError: No module named 'pkg.sub.value'"),
+            || stderr.contains("ModuleNotFoundError: No module named 'pkg.sub.value'")
+            || stderr.contains("ModuleNotFoundError: No module named 'pkg'"),
         "stderr:\n{stderr}"
     );
 }

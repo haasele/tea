@@ -356,7 +356,8 @@ const SOCKET_ECHO_STDOUT: &str = "b'ping' b'pong'\n";
 const STDLIB_MODULES_STDOUT: &str =
     "5 True file.txt\n1\ndefaultdict(<class 'list'>, {'a': [1]})\n['1', '22']\nbx\n";
 
-const STDLIB_UTILS_STDOUT: &str = "True\n5\nTrue\n1\nx\n3 True\n2.0\n2.0\nTrue\nHydro\n";
+const STDLIB_UTILS_STDOUT: &str =
+    "True\n5\nTrue\n1\nx\n3 True\n2.0\n2.0\nTrue\nHydro\nTrue\n6 True\nTrue\nTrue\n";
 
 const BINARY_FILES_STDOUT: &str = "5\n0 10\nb'\\x00A\\n'\nb'B\\n'\n";
 
@@ -529,22 +530,13 @@ fn check_dict_slice() {
 }
 
 #[test]
-fn check_augmented_slice_assign() {
+fn run_augmented_slice_assign() {
     let program = example("errors/slice_assign.py");
     let (code, stdout, stderr) = run(&["infuse", &program]);
 
-    assert_eq!(
-        code, 1,
-        "augmented slice assignment must exit with status 1"
-    );
-    assert!(
-        stdout.is_empty(),
-        "no code may run after a frontend diagnostic"
-    );
-    assert!(
-        stderr.contains("augmented slice assignment"),
-        "missing augmented slice assignment diagnostic, got:\n{stderr}"
-    );
+    assert_eq!(code, 0, "augmented slice assignment failed:\n{stderr}");
+    assert!(stderr.is_empty(), "unexpected stderr:\n{stderr}");
+    assert_eq!(stdout, "[1, 9, 2, 3]\n");
 }
 
 #[test]
@@ -953,16 +945,13 @@ fn run_tuples_gc() {
 }
 
 #[test]
-fn check_tuple_star() {
+fn run_tuple_star() {
     let program = example("errors/tuple_star.py");
-    let (code, stdout, stderr) = run(&["check", &program]);
+    let (code, stdout, stderr) = run(&["infuse", &program]);
 
-    assert_eq!(code, 1, "starred tuple unpacking must exit with status 1");
-    assert!(stdout.is_empty(), "tea check must not write to stdout");
-    assert!(
-        stderr.contains("starred unpacking"),
-        "missing starred unpacking diagnostic, got:\n{stderr}"
-    );
+    assert_eq!(code, 0, "starred tuple unpacking failed:\n{stderr}");
+    assert!(stderr.is_empty(), "unexpected stderr:\n{stderr}");
+    assert_eq!(stdout, "1 [2] 3\n");
 }
 
 #[test]
@@ -1792,16 +1781,13 @@ fn run_functions_gc() {
 }
 
 #[test]
-fn check_lambda_closure() {
+fn run_lambda_closure() {
     let program = example("errors/lambda_closure.py");
-    let (code, stdout, stderr) = run(&["check", &program]);
+    let (code, stdout, stderr) = run(&["infuse", &program]);
 
-    assert_eq!(code, 1, "capturing lambda must exit with status 1");
-    assert!(stdout.is_empty(), "tea check must not write to stdout");
-    assert!(
-        stderr.contains("closures") || stderr.contains("not supported"),
-        "missing closure diagnostic, got:\n{stderr}"
-    );
+    assert_eq!(code, 0, "capturing lambda failed:\n{stderr}");
+    assert!(stderr.is_empty(), "unexpected stderr:\n{stderr}");
+    assert_eq!(stdout, "1\n");
 }
 
 #[test]
@@ -1850,16 +1836,13 @@ fn check_indirect_noncallable() {
 }
 
 #[test]
-fn check_lambda_default() {
+fn run_lambda_default() {
     let program = example("errors/lambda_default.py");
-    let (code, stdout, stderr) = run(&["check", &program]);
+    let (code, stdout, stderr) = run(&["infuse", &program]);
 
-    assert_eq!(code, 1, "lambda default value must exit with status 1");
-    assert!(stdout.is_empty(), "tea check must not write to stdout");
-    assert!(
-        stderr.contains("default"),
-        "missing default parameter diagnostic, got:\n{stderr}"
-    );
+    assert_eq!(code, 0, "lambda default value failed:\n{stderr}");
+    assert!(stderr.is_empty(), "unexpected stderr:\n{stderr}");
+    assert_eq!(stdout, "1\n");
 }
 
 #[test]

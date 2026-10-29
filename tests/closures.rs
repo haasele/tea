@@ -364,7 +364,7 @@ print(get())
 }
 
 #[test]
-fn recursive_nested_functions_are_rejected_with_a_diagnostic() {
+fn recursive_nested_functions_use_a_shared_cell() {
     let path = write_source(
         "recursive",
         "\
@@ -379,9 +379,7 @@ f = outer()
     let output = run(&["check", path.to_str().expect("UTF-8 temp path")]);
     let _ = std::fs::remove_dir_all(path.parent().expect("temp parent"));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_eq!(output.status.code(), Some(1), "stderr:\n{stderr}");
-    assert!(
-        stderr.contains("recursive nested functions are not supported"),
-        "stderr:\n{stderr}"
-    );
+    // Recursive nested functions are lowered through a shared cell binding;
+    // compilation must succeed (calling `outer()` would recurse at runtime).
+    assert_eq!(output.status.code(), Some(0), "stderr:\n{stderr}");
 }

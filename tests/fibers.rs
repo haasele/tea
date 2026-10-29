@@ -771,14 +771,11 @@ except ValueError:
 }
 
 #[test]
-fn generator_expression_rejects_a_foreign_walrus_target() {
-    let source = "gen = ((y := v) for v in [1, 2])\n";
-    let (code, _, stderr) = run_source("genexp_walrus", source);
-    assert_eq!(code, 1, "stderr:\n{stderr}");
-    assert!(
-        stderr.contains("assignment expressions inside a generator expression"),
-        "missing walrus diagnostic, got:\n{stderr}"
-    );
+fn generator_expression_walrus_binds_the_enclosing_scope() {
+    let source = "gen = ((y := v) for v in [1, 2])\nprint(list(gen))\nprint(y)\n";
+    let (code, stdout, stderr) = run_source("genexp_walrus", source);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "[1, 2]\n2\n");
 }
 
 #[test]

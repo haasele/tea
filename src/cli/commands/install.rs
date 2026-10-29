@@ -2,12 +2,13 @@
 //!
 //! A wheel is an ordinary ZIP archive. The installer reads the archive into
 //! memory, validates the filename tags against the CPython target advertised by
-//! [`hydro_ir`], and validates every member name, type and compression method
-//! *before* it writes anything. The archive is then unpacked into a temporary
-//! directory next to the target; a new target is created with a single atomic
-//! rename, and an existing target is updated with per-file renames after the
-//! whole archive has been read. A rejected or truncated wheel therefore never
-//! reports success or leaves a half-extracted package behind.
+//! [`hydro_ir`] (or, for a Hydro-native wheel, against the supported
+//! `hydro1_0` ABI on Linux x86_64), and validates every member name, type and
+//! compression method *before* it writes anything. The archive is then unpacked
+//! into a temporary directory next to the target; a new target is created with
+//! a single atomic rename, and an existing target is updated with per-file
+//! renames after the whole archive has been read. A rejected or truncated wheel
+//! therefore never reports success or leaves a half-extracted package behind.
 //!
 //! Members are written verbatim: package files are never rewritten, and the
 //! wheel's `.dist-info` directory is preserved. The only added file is
@@ -38,6 +39,15 @@ const LOCAL_SITE_PACKAGES: &str = ".tea/site-packages";
 /// Contents of the installation record written into `.dist-info/INSTALLER`.
 const INSTALLER_CONTENT: &str = "tea\n";
 
+/// ABI tag of a Hydro-native wheel (`py3-none-hydro1_0_<platform>`), see
+/// `docs/NATIVE_BINDINGS.md` §4.3 in the Hydro repository. Installation only
+/// recognizes the tag; it does not claim that the runtime can load HNA
+/// artifacts.
+const HYDRO_ABI_TAG: &str = "hydro1_0";
+
+/// Python tag required by a Hydro-native wheel.
+const HYDRO_PYTHON_TAG: &str = "py3";
+
 /// Prefix of the temporary directory created next to the target.
 const STAGING_PREFIX: &str = ".tea-install-";
 
@@ -66,6 +76,10 @@ pub(crate) fn cmd_install(args: &[OsString], verbosity: Verbosity) -> CliResult 
             println!(
                 "tea install: loadable extension suffixes: <leaf>.so, <leaf>.abi3.so, \
                  <leaf>.{PYTHON_ABI_TAG}-<platform>.so"
+            );
+            println!(
+                "tea install: hydro native artifacts: <leaf>.hna.so (wheel ABI tag \
+                 '{HYDRO_ABI_TAG}'; runtime loading is not implemented yet)"
             );
         }
         if !target_is_discovered(&target) {
@@ -133,6 +147,9 @@ fn same_path(left: &Path, right: &Path) -> bool {
 struct WheelName {
     distribution: String,
     version: String,
+    /// The optional wheel build field. The documented Hydro spelling
+    /// `py3-none-hydro1_0-<platform>` puts `py3` in this slot.
+    build_tag: Option<String>,
     python_tags: Vec<String>,
     abi_tags: Vec<String>,
     platform_tags: Vec<String>,
@@ -150,9 +167,9 @@ impl WheelName {
             ))
         })?;
         let parts: Vec<&str> = stem.split('-').collect();
-        let (distribution, version, python, abi, platform) = match parts.as_slice() {
+        let (distribution, version, build, python, abi, platform) = match parts.as_slice() {
             [distribution, version, python, abi, platform] => {
-                (*distribution, *version, *python, *abi, *platform)
+                (*distribution, *version, None, *python, *abi, *platform)
             }
             [distribution, version, build, python, abi, platform] => {
                 if build.is_empty() {
@@ -160,7 +177,14 @@ impl WheelName {
                         "'{file_name}' has an empty wheel build tag"
                     )));
                 }
-                (*distribution, *version, *python, *abi, *platform)
+                (
+                    *distribution,
+                    *version,
+                    Some(*build),
+                    *python,
+                    *abi,
+                    *platform,
+                )
             }
             _ => {
                 return Err(install_error(format!(
@@ -185,6 +209,7 @@ impl WheelName {
         Ok(WheelName {
             distribution: distribution.to_string(),
             version: version.to_string(),
+            build_tag: build.map(str::to_string),
             python_tags,
             abi_tags,
             platform_tags,
@@ -192,6 +217,14 @@ impl WheelName {
     }
 
     fn check_compatible(&self) -> Result<(), CliError> {
+        // A Hydro ABI tag routes through its own rules: the CPython ABI
+        // ladder (`none`/`abi3`/`cp3NN`) does not describe HNA artifacts.
+        // The documented spelling carries the ABI either in the ABI field
+        // (`py3-hydro1_0-<platform>`) or as a platform-tag prefix
+        // (`py3-none-hydro1_0_<platform>`).
+        if self.hydro_abi_requested() {
+            return self.check_hydro_compatible();
+        }
         for abi in &self.abi_tags {
             if !self.platforms_compatible(abi) {
                 continue;
@@ -213,6 +246,50 @@ impl WheelName {
         )))
     }
 
+    /// Whether any tag names a Hydro ABI, so the hydro diagnostics apply
+    /// instead of the CPython ones.
+    fn hydro_abi_requested(&self) -> bool {
+        self.abi_tags
+            .iter()
+            .any(|abi| split_hydro_abi(abi).is_some())
+            || self
+                .platform_tags
+                .iter()
+                .any(|tag| split_hydro_abi(tag).is_some())
+    }
+
+    /// Hydro-native wheels are accepted only for the documented tag: Python
+    /// `py3`, ABI [`HYDRO_ABI_TAG`] and a Linux x86_64 platform. The platform
+    /// is never `any`: HNA artifacts are native binaries.
+    fn check_hydro_compatible(&self) -> Result<(), CliError> {
+        let abi_ok = self.abi_tags.iter().any(|abi| abi == HYDRO_ABI_TAG)
+            || self
+                .platform_tags
+                .iter()
+                .any(|tag| split_hydro_abi(tag).is_some_and(|(abi, _)| abi == HYDRO_ABI_TAG));
+        // `py3-none-hydro1_0-<platform>` is the documented spelling; the wheel
+        // grammar reads it as build `py3`, Python tag `none`, ABI `hydro1_0`,
+        // so the build field carries the Python tag there.
+        let python_ok = self.python_tags.iter().any(|tag| tag == HYDRO_PYTHON_TAG)
+            || (self.python_tags.iter().any(|tag| tag == "none")
+                && self.build_tag.as_deref() == Some(HYDRO_PYTHON_TAG));
+        let platform_ok = self
+            .platform_tags
+            .iter()
+            .any(|tag| hydro_platform_tag_matches(tag));
+        if abi_ok && python_ok && platform_ok {
+            return Ok(());
+        }
+        Err(install_error(format!(
+            "incompatible wheel: {}-{}-{} is not a supported Hydro native wheel \
+             (expected Python tag '{HYDRO_PYTHON_TAG}', ABI tag '{HYDRO_ABI_TAG}' and a \
+             linux_x86_64 or manylinux*_x86_64 platform; supported Hydro ABI: {HYDRO_ABI_TAG})",
+            self.python_tags.join("."),
+            self.abi_tags.join("."),
+            self.platform_tags.join(".")
+        )))
+    }
+
     fn platforms_compatible(&self, abi: &str) -> bool {
         let pure = abi == "none";
         self.platform_tags.iter().any(|tag| {
@@ -230,6 +307,28 @@ fn split_tags(tags: &str) -> Vec<String> {
         .filter(|tag| !tag.is_empty())
         .map(str::to_string)
         .collect()
+}
+
+/// Split a Hydro ABI tag (`hydro<major>_<minor>`) from the front of `tag`.
+/// Returns the ABI token and the remainder after the separating `_`, if any:
+/// `hydro1_0` → (`hydro1_0`, `None`), `hydro1_0_linux_x86_64` →
+/// (`hydro1_0`, `Some("linux_x86_64")`). Anything else is `None`, so
+/// CPython tags never take the Hydro path.
+fn split_hydro_abi(tag: &str) -> Option<(&str, Option<&str>)> {
+    let rest = tag.strip_prefix("hydro")?;
+    let (major, rest) = rest.split_once('_')?;
+    if major.is_empty() || !major.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let (minor, tail) = match rest.split_once('_') {
+        Some((minor, tail)) => (minor, Some(tail)),
+        None => (rest, None),
+    };
+    if minor.is_empty() || !minor.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let token_len = "hydro".len() + major.len() + 1 + minor.len();
+    Some((&tag[..token_len], tail))
 }
 
 /// The concrete ABI tag (`cp314`) corresponding to [`PYTHON_ABI_TAG`].
@@ -320,6 +419,25 @@ fn native_platform_matches(tag: &str) -> bool {
         }
         _ => tag == format!("{}_{arch}", env::consts::OS).as_str(),
     }
+}
+
+/// Hydro-native wheels exist only for Linux x86_64: `linux_x86_64` or a
+/// `manylinux*_x86_64` tag. `any` is never a Hydro platform. The documented
+/// spelling may prefix the platform with the ABI token
+/// (`hydro1_0_linux_x86_64`); the prefix is stripped first.
+fn hydro_platform_tag_matches(tag: &str) -> bool {
+    match split_hydro_abi(tag) {
+        Some((_, Some(platform))) => hydro_platform_matches(platform),
+        Some((_, None)) => false,
+        None => hydro_platform_matches(tag),
+    }
+}
+
+fn hydro_platform_matches(tag: &str) -> bool {
+    if !(cfg!(target_os = "linux") && cfg!(target_arch = "x86_64")) {
+        return false;
+    }
+    tag == "linux_x86_64" || (tag.starts_with("manylinux") && tag.ends_with("_x86_64"))
 }
 
 fn wheel_arch() -> &'static str {

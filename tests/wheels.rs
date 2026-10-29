@@ -5,6 +5,7 @@
 //! broken archives for the rejection paths. The CLI is driven through
 //! `CARGO_BIN_EXE_tea`, like the other CLI tests.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -320,6 +321,120 @@ fn write_wheel(dir: &Path, file_name: &str, members: &[Member]) -> PathBuf {
     path
 }
 
+// --- verbatim and Hydro-native fixtures -----------------------------------
+
+/// Arbitrary non-Python bytes standing in for an HNA artifact. The install
+/// tests only check byte preservation; loadability is not claimed.
+const HNA_ARTIFACT: &[u8] = b"\x7fELF\x02\x01\x01hydro-native-fixture\x00\x01\x02\x03";
+
+const VERBATIM_WHEEL: &str = "verbatimpkg-1.0-py3-none-any.whl";
+const VERBATIM_PY: &str = "VALUE = 42\n\ndef add(a, b):\n    return a + b\n";
+const VERBATIM_RECORD: &str = "verbatimpkg/__init__.py,,\nverbatimpkg/_fast.hna.so,,\n";
+
+/// A CPython wheel that already ships a compiled sibling next to its source.
+fn verbatim_wheel_members() -> Vec<Member> {
+    vec![
+        Member::directory("verbatimpkg/"),
+        Member::deflated("verbatimpkg/__init__.py", VERBATIM_PY),
+        Member::binary("verbatimpkg/_fast.hna.so", HNA_ARTIFACT.to_vec(), 0o100755),
+        Member::directory("verbatimpkg-1.0.dist-info/"),
+        Member::file(
+            "verbatimpkg-1.0.dist-info/METADATA",
+            "Metadata-Version: 2.1\nName: verbatimpkg\nVersion: 1.0\n",
+        ),
+        Member::file(
+            "verbatimpkg-1.0.dist-info/WHEEL",
+            "Wheel-Version: 1.0\nGenerator: tea-wheels-test\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+        ),
+        Member::file("verbatimpkg-1.0.dist-info/RECORD", VERBATIM_RECORD),
+    ]
+}
+
+const HYDRO_WHEEL: &str = "nativemix-1.0-py3-none-hydro1_0-linux_x86_64.whl";
+const HYDRO_MANYLINUX_WHEEL: &str = "nativemix-1.0-py3-none-hydro1_0-manylinux_2_17_x86_64.whl";
+/// The same tag with the ABI in the ABI field instead of the platform prefix.
+const HYDRO_ABI_FIELD_WHEEL: &str = "nativemix-1.0-py3-hydro1_0-linux_x86_64.whl";
+/// The documented spelling with the ABI prefixed to the platform tag.
+const HYDRO_UNDERSCORE_WHEEL: &str = "nativemix-1.0-py3-none-hydro1_0_linux_x86_64.whl";
+const HYDRO_RECORD: &str = "nativemix/__init__.py,,\nnativemix/_fast.hna.so,,\n";
+
+/// A mixed distribution: Python package source plus a Hydro native artifact.
+fn hydro_wheel_members(platform_tag: &str) -> Vec<Member> {
+    vec![
+        Member::directory("nativemix/"),
+        Member::deflated("nativemix/__init__.py", "VALUE = 7\n"),
+        Member::binary("nativemix/_fast.hna.so", HNA_ARTIFACT.to_vec(), 0o100755),
+        Member::directory("nativemix-1.0.dist-info/"),
+        Member::file(
+            "nativemix-1.0.dist-info/METADATA",
+            "Metadata-Version: 2.1\nName: nativemix\nVersion: 1.0\n",
+        ),
+        Member::file(
+            "nativemix-1.0.dist-info/WHEEL",
+            &format!(
+                "Wheel-Version: 1.0\nGenerator: tea-wheels-test\nRoot-Is-Purelib: false\nTag: py3-none-hydro1_0-{platform_tag}\n"
+            ),
+        ),
+        Member::file("nativemix-1.0.dist-info/RECORD", HYDRO_RECORD),
+    ]
+}
+
+fn is_file_member(member: &Member) -> bool {
+    !member.name.ends_with('/') && (member.mode & 0o170000) != 0o040000
+}
+
+/// Every non-directory wheel member must be on disk with exactly the wheel's
+/// bytes; `.dist-info` records included.
+fn assert_members_verbatim(target: &Path, members: &[Member]) {
+    for member in members.iter().filter(|member| is_file_member(member)) {
+        let installed = target.join(&member.name);
+        let contents = fs::read(&installed)
+            .unwrap_or_else(|error| panic!("missing installed '{}': {error}", member.name));
+        assert_eq!(
+            contents, member.data,
+            "installed '{}' differs from its wheel bytes",
+            member.name
+        );
+    }
+}
+
+/// Relative path -> bytes for every file below `root`, in sorted order.
+fn snapshot_tree(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+    let mut snapshot = BTreeMap::new();
+    collect_tree(root, root, &mut snapshot);
+    snapshot
+}
+
+fn collect_tree(root: &Path, directory: &Path, snapshot: &mut BTreeMap<PathBuf, Vec<u8>>) {
+    let mut entries: Vec<PathBuf> = fs::read_dir(directory)
+        .expect("list directory")
+        .map(|entry| entry.expect("directory entry").path())
+        .collect();
+    entries.sort();
+    for path in entries {
+        if path.is_dir() {
+            collect_tree(root, &path, snapshot);
+        } else {
+            let relative = path
+                .strip_prefix(root)
+                .expect("entry below root")
+                .to_path_buf();
+            snapshot.insert(relative, fs::read(&path).expect("read installed file"));
+        }
+    }
+}
+
+fn assert_no_staging_directory(dir: &Path) {
+    for entry in fs::read_dir(dir).expect("list temp dir") {
+        let name = entry.expect("temp entry").file_name();
+        assert!(
+            !name.to_string_lossy().starts_with(".tea-install-"),
+            "staging directory left behind: {}",
+            name.to_string_lossy()
+        );
+    }
+}
+
 fn file_member_count(members: &[Member]) -> usize {
     members
         .iter()
@@ -447,6 +562,200 @@ fn rejects_incompatible_wheel_tags_without_writing() {
             !stdout.contains("installed"),
             "{name}: must not report success"
         );
+        assert!(!target.exists(), "{name}: target must not be created");
+    }
+}
+
+#[test]
+fn cpython_wheel_install_is_verbatim_and_reinstall_is_deterministic() {
+    let temp = TempDir::new("verbatim");
+    let members = verbatim_wheel_members();
+    let wheel = write_wheel(temp.path(), VERBATIM_WHEEL, &members);
+    let target = temp.path().join("site");
+    let wheel_arg = display(&wheel);
+    let target_arg = display(&target);
+
+    let (code, stdout, stderr) = run_tea(
+        temp.path(),
+        &["install", &wheel_arg, "--target", &target_arg, "--verbose"],
+        &[],
+    );
+    assert_eq!(code, 0, "install failed:\n{stderr}");
+    assert!(
+        stdout.contains(format!("{} files", file_member_count(&members)).as_str()),
+        "verbose output must report the installed file count:\n{stdout}"
+    );
+    // Verbose output names the HNA suffix and its wheel ABI, without claiming
+    // that the runtime can load it.
+    assert!(
+        stdout.contains(".hna.so") && stdout.contains("hydro1_0"),
+        "verbose output must list Hydro artifacts and their ABI:\n{stdout}"
+    );
+
+    // Every original member byte survives, including RECORD and the compiled
+    // `.hna.so` sibling of the `.py` module.
+    assert_members_verbatim(&target, &members);
+    assert_eq!(
+        fs::read_to_string(target.join("verbatimpkg-1.0.dist-info/RECORD"))
+            .expect("installed RECORD"),
+        VERBATIM_RECORD
+    );
+    assert_eq!(
+        fs::read(target.join("verbatimpkg/__init__.py")).expect("installed __init__.py"),
+        VERBATIM_PY.as_bytes()
+    );
+    assert_eq!(
+        fs::read(target.join("verbatimpkg/_fast.hna.so")).expect("installed HNA artifact"),
+        HNA_ARTIFACT
+    );
+    // Only the installation record is added.
+    assert_eq!(
+        fs::read_to_string(target.join("verbatimpkg-1.0.dist-info/INSTALLER"))
+            .expect("installed INSTALLER record"),
+        "tea\n"
+    );
+
+    // Reinstalling the same wheel into the populated target is deterministic:
+    // identical relative paths and identical bytes, with nothing left behind.
+    let first = snapshot_tree(&target);
+    let (code, _stdout, stderr) = run_tea(
+        temp.path(),
+        &["install", &wheel_arg, "--target", &target_arg, "--verbose"],
+        &[],
+    );
+    assert_eq!(code, 0, "reinstall failed:\n{stderr}");
+    assert_eq!(
+        snapshot_tree(&target),
+        first,
+        "reinstall must reproduce the exact installed tree"
+    );
+    assert_members_verbatim(&target, &members);
+    assert_no_staging_directory(temp.path());
+}
+
+#[test]
+fn installs_hydro_native_wheel_and_preserves_record() {
+    if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        eprintln!("skipping hydro wheel install test: Hydro wheels target linux x86_64");
+        return;
+    }
+
+    let temp = TempDir::new("hydro");
+    let cases = [
+        // Documented spelling: build `py3`, python `none`, ABI `hydro1_0`.
+        (HYDRO_WHEEL, "linux_x86_64"),
+        (HYDRO_MANYLINUX_WHEEL, "manylinux_2_17_x86_64"),
+        // Same tags with the ABI in the ABI field.
+        (HYDRO_ABI_FIELD_WHEEL, "linux_x86_64"),
+        // Documented spelling with the ABI prefixed to the platform tag.
+        (HYDRO_UNDERSCORE_WHEEL, "linux_x86_64"),
+    ];
+
+    for (index, (file_name, platform_tag)) in cases.iter().enumerate() {
+        let members = hydro_wheel_members(platform_tag);
+        let wheel = write_wheel(temp.path(), file_name, &members);
+        let target = temp.path().join(format!("site-{index}"));
+        let wheel_arg = display(&wheel);
+        let target_arg = display(&target);
+
+        let (code, stdout, stderr) = run_tea(
+            temp.path(),
+            &["install", &wheel_arg, "--target", &target_arg, "--verbose"],
+            &[],
+        );
+        assert_eq!(code, 0, "{file_name} install failed:\n{stderr}");
+        assert!(
+            stdout.contains(".hna.so") && stdout.contains("hydro1_0"),
+            "{file_name}: verbose output must list Hydro artifacts and their ABI:\n{stdout}"
+        );
+
+        // The mixed distribution lands under site-packages with both
+        // artifacts and a byte-identical RECORD.
+        assert!(target.join("nativemix/__init__.py").is_file());
+        assert!(target.join("nativemix/_fast.hna.so").is_file());
+        assert_members_verbatim(&target, &members);
+        assert_eq!(
+            fs::read_to_string(target.join("nativemix-1.0.dist-info/RECORD"))
+                .expect("installed RECORD"),
+            HYDRO_RECORD
+        );
+        assert_eq!(
+            fs::read(target.join("nativemix/_fast.hna.so")).expect("installed HNA artifact"),
+            HNA_ARTIFACT
+        );
+        assert_no_staging_directory(temp.path());
+    }
+
+    // The same mixed distribution also lands through the default
+    // project-local site-packages path.
+    let members = hydro_wheel_members("linux_x86_64");
+    let wheel = write_wheel(temp.path(), HYDRO_WHEEL, &members);
+    let (code, _stdout, stderr) = run_tea(temp.path(), &["install", &display(&wheel)], &[]);
+    assert_eq!(code, 0, "default-target install failed:\n{stderr}");
+    let local = temp.path().join(".tea/site-packages");
+    assert!(local.join("nativemix/__init__.py").is_file());
+    assert!(local.join("nativemix/_fast.hna.so").is_file());
+    assert_eq!(
+        fs::read_to_string(local.join("nativemix-1.0.dist-info/RECORD"))
+            .expect("installed local RECORD"),
+        HYDRO_RECORD
+    );
+}
+
+#[test]
+fn rejects_unsupported_hydro_and_cpython_wheel_tags_without_writing() {
+    let temp = TempDir::new("hydro-tags");
+    let members = hydro_wheel_members("linux_x86_64");
+    // (wheel name, must name the supported Hydro ABI in the diagnostic)
+    let wheels = [
+        // ABI version newer than the supported `hydro1_0`.
+        ("nativemix-1.0-py3-none-hydro2_0-linux_x86_64.whl", true),
+        ("nativemix-1.0-py3-hydro2_0-linux_x86_64.whl", true),
+        ("nativemix-1.0-py3-none-hydro2_0_linux_x86_64.whl", true),
+        // Hydro artifacts are native: the platform may not be `any`.
+        ("nativemix-1.0-py3-none-hydro1_0-any.whl", true),
+        ("nativemix-1.0-py3-none-hydro1_0_any.whl", true),
+        // Non-Linux platforms are not supported for Hydro wheels.
+        ("nativemix-1.0-py3-none-hydro1_0-win_amd64.whl", true),
+        (
+            "nativemix-1.0-py3-none-hydro1_0-macosx_11_0_arm64.whl",
+            true,
+        ),
+        // Only the documented `py3` Python tag is accepted.
+        ("nativemix-1.0-py310-none-hydro1_0-linux_x86_64.whl", true),
+        // A CPython wheel with an unknown concrete ABI stays rejected on the
+        // CPython path.
+        ("nativemix-1.0-cp314-cp313-manylinux_2_17_x86_64.whl", false),
+    ];
+
+    for (index, (name, names_hydro_abi)) in wheels.iter().enumerate() {
+        let wheel = write_wheel(temp.path(), name, &members);
+        let target = temp.path().join(format!("site-{index}"));
+        let (code, stdout, stderr) = run_tea(
+            temp.path(),
+            &["install", &display(&wheel), "--target", &display(&target)],
+            &[],
+        );
+        assert_eq!(code, 1, "{name} must be rejected:\n{stderr}");
+        assert!(
+            stderr.contains("incompatible wheel"),
+            "{name}: missing incompatible tag error:\n{stderr}"
+        );
+        assert!(
+            !stdout.contains("installed"),
+            "{name}: must not report success"
+        );
+        if *names_hydro_abi {
+            assert!(
+                stderr.contains("hydro1_0"),
+                "{name}: diagnostic must name the supported Hydro ABI:\n{stderr}"
+            );
+        } else {
+            assert!(
+                !stderr.contains("hydro1_0"),
+                "{name}: CPython rejections must not mention the Hydro ABI:\n{stderr}"
+            );
+        }
         assert!(!target.exists(), "{name}: target must not be created");
     }
 }
