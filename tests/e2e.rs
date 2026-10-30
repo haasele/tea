@@ -3068,7 +3068,7 @@ fn typing_alias_subscripts_are_runtime_values() {
     let (code, stdout, stderr) = run(&["infuse", &program]);
 
     assert_eq!(code, 0, "tea infuse failed: {stderr}");
-    assert_eq!(stdout, "Tuple Optional\n");
+    assert_eq!(stdout, "Tuple Union\n");
 }
 
 #[test]

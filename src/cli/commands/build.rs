@@ -548,7 +548,18 @@ fn run_linker(object: &Path, runtime: &Path, output: &Path) -> Result<(), LinkFa
     if cfg!(target_os = "linux") {
         command.arg("-Wl,--export-dynamic");
     }
-    command.arg("-lpthread").arg("-ldl").arg("-lm").arg("-lz");
+    command
+        .arg("-lpthread")
+        .arg("-ldl")
+        .arg("-lm")
+        .arg("-lz")
+        .arg("-lsqlite3")
+        .arg("-lexpat")
+        .arg("-lbz2")
+        .arg("-llzma")
+        .arg("-lgdbm")
+        .arg("-lgdbm_compat")
+        .arg("-lzstd");
 
     let result = command.output().map_err(|error| LinkFailure {
         compiler: compiler.clone(),
